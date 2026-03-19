@@ -3,84 +3,76 @@ import pandas as pd
 import plotly.express as px
 
 # Configuração da página
-st.set_page_config(page_title="Dashboard de Processos SEI", layout="wide")
+st.set_page_config(page_title="Dashboard SEI - Real Data", layout="wide")
 
-st.title("📊 Dashboard de Gestão de Processos")
+st.title("📊 Gestão de Processos SEI")
 
-uploaded_file = st.file_uploader("Escolha o arquivo (Excel ou CSV)", type=['xlsx', 'csv'])
+uploaded_file = st.file_uploader("Arraste sua planilha aqui", type=['xlsx', 'csv'])
 
 if uploaded_file is not None:
     try:
-        # 1. Carregar os dados
+        # 1. CARREGAMENTO COM DETECÇÃO DE SEPARADOR
         if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file, encoding='latin-1', sep=None, engine='python')
+            df = pd.read_csv(uploaded_file, sep=None, engine='python', encoding='latin-1')
         else:
             df = pd.read_excel(uploaded_file)
-        
-        # 2. LIMPEZA CRÍTICA DE COLUNAS (Onde estava o erro)
-        # Remove espaços em branco no início/fim e normaliza o texto
-        df.columns = df.columns.str.strip()
-        
-        # 3. Tratamento de Datas e Números
-        # (Ajuste os nomes abaixo caso sua planilha use nomes ligeiramente diferentes)
-        colunas_datas = ['Data de recebimento', 'Data de hoje', 'Data de Saída']
-        for col in colunas_datas:
-            if col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors='coerce')
-        
+
+        # 2. LIMPEZA TOTAL (Nomes de colunas e Conteúdo)
+        df.columns = df.columns.str.strip() # Remove espaços nos títulos
+        df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x) # Remove espaços nas células
+
+        # 3. CONVERSÃO DE TIPOS (Garantindo que 'Tempo / Dias' seja número)
         if 'Tempo / Dias' in df.columns:
             df['Tempo / Dias'] = pd.to_numeric(df['Tempo / Dias'], errors='coerce').fillna(0)
 
-        # --- Verificação de Segurança ---
-        if 'Situação' not in df.columns:
-            st.error(f"Coluna 'Situação' não encontrada. Colunas detectadas: {list(df.columns)}")
-            st.stop()
-
-        # --- 4. KPIs PRINCIPAIS ---
+        # 4. CÁLCULO DOS KPIs (Baseado na sua amostra real)
         total_processos = len(df)
-        # Filtro flexível para "Aberto" ou "Concluído"
-        abertos = len(df[df['Situação'].str.contains('Aberto', na=False, case=False)])
-        concluidos = len(df[df['Situação'].str.contains('Concluído|Concluido', na=False, case=False)])
+        
+        # Filtros precisos para a coluna 'Situação'
+        # Buscamos qualquer célula que contenha "Aberto" ou "Concluído"
+        mask_aberto = df['Situação'].str.contains('Aberto', case=False, na=False)
+        mask_concluido = df['Situação'].str.contains('Concluído|Concluido', case=False, na=False)
+        
+        abertos = mask_aberto.sum()
+        concluidos = mask_concluido.sum()
         tempo_medio = df['Tempo / Dias'].mean()
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total de Processos", total_processos)
-        c2.metric("📦 Em Aberto", abertos)
-        c3.metric("✅ Concluídos", concluidos)
-        c4.metric("⏱️ Tempo Médio", f"{tempo_medio:.1f} dias")
+        # EXIBIÇÃO DOS INDICADORES
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total de Processos", total_processos)
+        col2.metric("📂 Em Aberto", abertos)
+        col3.metric("✅ Concluídos", concluidos)
+        col4.metric("⏱️ Média de Dias", f"{tempo_medio:.1f}")
 
         st.divider()
 
-        # --- 5. GRÁFICOS ---
+        # 5. GRÁFICOS CORRIGIDOS (Evitando erro de 'index' ou 'count')
         row1_col1, row1_col2 = st.columns(2)
 
         with row1_col1:
             st.subheader("Processos por Responsável")
-            
-            # Criamos a contagem e resetamos o index
-            # O Pandas 2.0+ nomeia as colunas como [NomeOriginal, 'count']
+            # Contagem real: Claudia (4), Calazans (1), Juliano (1)
             df_resp = df['Responsável'].value_counts().reset_index()
+            df_resp.columns = ['Nome', 'Quantidade'] # Forçamos nomes claros
             
-            # Para garantir que funcione em qualquer versão, renomeamos manualmente
-            df_resp.columns = ['Responsável', 'Quantidade']
-            
-            fig_resp = px.bar(
-                df_resp, 
-                x='Responsável', 
-                y='Quantidade', 
-                color='Responsável',
-                text_auto=True, # Mostra o número em cima da barra
-                template="plotly_white"
-            )
+            fig_resp = px.bar(df_resp, x='Nome', y='Quantidade', 
+                              color='Nome', text='Quantidade',
+                              color_discrete_sequence=px.colors.qualitative.Set2)
             st.plotly_chart(fig_resp, use_container_width=True)
 
         with row1_col2:
-            st.subheader("Distribuição por Situação")
-            fig_sit = px.pie(df, names='Situação', hole=0.4)
+            st.subheader("Situação Atual")
+            fig_sit = px.pie(df, names='Situação', hole=0.5,
+                             color_discrete_map={'Aberto na unidade': '#EF553B', 
+                                               'Concluído na unidade': '#00CC96'})
             st.plotly_chart(fig_sit, use_container_width=True)
 
-        st.subheader("🔍 Visualização dos Dados")
+        # 6. TABELA COM FILTRO DINÂMICO
+        st.subheader("🔍 Base de Dados Completa")
         st.dataframe(df, use_container_width=True)
 
     except Exception as e:
-        st.error(f"Erro inesperado: {e}")
+        st.error(f"Erro na leitura dos dados: {e}")
+        st.info("Verifique se as colunas 'Situação' e 'Responsável' existem na sua planilha.")
+else:
+    st.info("Aguardando upload dos dados reais...")
