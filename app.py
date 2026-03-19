@@ -6,80 +6,69 @@ import plotly.express as px
 st.set_page_config(page_title="Dashboard de Processos SEI", layout="wide")
 
 st.title("📊 Dashboard de Gestão de Processos")
-st.markdown("Carregue sua planilha exportada para visualizar os indicadores em tempo real.")
 
-# --- 1. UPLOAD DO ARQUIVO ---
 uploaded_file = st.file_uploader("Escolha o arquivo (Excel ou CSV)", type=['xlsx', 'csv'])
 
 if uploaded_file is not None:
-    # Leitura dos dados
     try:
+        # 1. Carregar os dados
         if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
+            df = pd.read_csv(uploaded_file, encoding='latin-1', sep=None, engine='python')
         else:
             df = pd.read_excel(uploaded_file)
         
-        # Tratamento básico de colunas (Garantir que datas sejam datas)
-        date_cols = ['Data de recebimento', 'Data de hoje', 'Data de Saída']
-        for col in date_cols:
+        # 2. LIMPEZA CRÍTICA DE COLUNAS (Onde estava o erro)
+        # Remove espaços em branco no início/fim e normaliza o texto
+        df.columns = df.columns.str.strip()
+        
+        # 3. Tratamento de Datas e Números
+        # (Ajuste os nomes abaixo caso sua planilha use nomes ligeiramente diferentes)
+        colunas_datas = ['Data de recebimento', 'Data de hoje', 'Data de Saída']
+        for col in colunas_datas:
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors='coerce')
+        
+        if 'Tempo / Dias' in df.columns:
+            df['Tempo / Dias'] = pd.to_numeric(df['Tempo / Dias'], errors='coerce').fillna(0)
 
-        # --- 2. KPIs PRINCIPAIS ---
+        # --- Verificação de Segurança ---
+        if 'Situação' not in df.columns:
+            st.error(f"Coluna 'Situação' não encontrada. Colunas detectadas: {list(df.columns)}")
+            st.stop()
+
+        # --- 4. KPIs PRINCIPAIS ---
         total_processos = len(df)
-        abertos = len(df[df['Situação'].str.contains('Aberto', na=False)])
-        concluidos = len(df[df['Situação'].str.contains('Concluído', na=False)])
-        tempo_medio = df['Tempo / Dias'].mean() if 'Tempo / Dias' in df.columns else 0
+        # Filtro flexível para "Aberto" ou "Concluído"
+        abertos = len(df[df['Situação'].str.contains('Aberto', na=False, case=False)])
+        concluidos = len(df[df['Situação'].str.contains('Concluído|Concluido', na=False, case=False)])
+        tempo_medio = df['Tempo / Dias'].mean()
 
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total de Processos", total_processos)
-        col2.metric("📦 Em Aberto", abertos, delta_color="inverse")
-        col3.metric("✅ Concluídos", concluidos)
-        col4.metric("⏱️ Tempo Médio (Dias)", f"{tempo_medio:.1f}")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total de Processos", total_processos)
+        c2.metric("📦 Em Aberto", abertos)
+        c3.metric("✅ Concluídos", concluidos)
+        c4.metric("⏱️ Tempo Médio", f"{tempo_medio:.1f} dias")
 
         st.divider()
 
-        # --- 3. GRÁFICOS INTERATIVOS ---
+        # --- 5. GRÁFICOS ---
         row1_col1, row1_col2 = st.columns(2)
 
         with row1_col1:
             st.subheader("Processos por Responsável")
-            fig_resp = px.bar(df['Responsável'].value_counts().reset_index(), 
-                              x='index', y='Responsável', 
-                              labels={'index': 'Responsável', 'Responsável': 'Qtd'},
-                              color='Responsável', template="plotly_white")
+            # Usando 'Responsável' com limpeza
+            col_resp = 'Responsável' if 'Responsável' in df.columns else df.columns[4]
+            fig_resp = px.bar(df[col_resp].value_counts().reset_index(), 
+                              x='index', y=col_resp, color='index')
             st.plotly_chart(fig_resp, use_container_width=True)
 
         with row1_col2:
             st.subheader("Distribuição por Situação")
-            fig_sit = px.pie(df, names='Situação', hole=0.4, 
-                             color_discrete_sequence=px.colors.qualitative.Pastel)
+            fig_sit = px.pie(df, names='Situação', hole=0.4)
             st.plotly_chart(fig_sit, use_container_width=True)
 
-        row2_col1, row2_col2 = st.columns(2)
-
-        with row2_col1:
-            st.subheader("Tipos de Documento")
-            fig_tipo = px.bar(df['Tipo'].value_counts().reset_index(), 
-                              y='index', x='Tipo', orientation='h',
-                              labels={'index': 'Tipo', 'Tipo': 'Qtd'},
-                              color_discrete_sequence=['#636EFA'])
-            st.plotly_chart(fig_tipo, use_container_width=True)
-
-        with row2_col2:
-            st.subheader("Tempo de Tramitação por Processo")
-            # Filtrando apenas processos com tempo definido
-            df_tempo = df.dropna(subset=['Tempo / Dias'])
-            fig_tempo = px.scatter(df_tempo, x='Data de recebimento', y='Tempo / Dias', 
-                                   size='Tempo / Dias', color='Responsável',
-                                   hover_data=['Assunto'], template="plotly_dark")
-            st.plotly_chart(fig_tempo, use_container_width=True)
-
-        # --- 4. TABELA DETALHADA ---
-        st.subheader("🔍 Detalhamento dos Dados")
+        st.subheader("🔍 Visualização dos Dados")
         st.dataframe(df, use_container_width=True)
 
     except Exception as e:
-        st.error(f"Erro ao processar o arquivo: {e}")
-else:
-    st.info("Aguardando o carregamento da planilha para gerar o dashboard.")
+        st.error(f"Erro inesperado: {e}")
