@@ -3,74 +3,87 @@ import pandas as pd
 import plotly.express as px
 
 # Configuração da página
-st.set_page_config(page_title="Dashboard KPIs SEI", layout="wide")
+st.set_page_config(page_title="Dashboard KPIs SEI", layout="wide", page_icon="📊")
 
 def parse_sheet_data(df):
     """
-    Função para extrair dados da estrutura:
-    Linha 0: Labels (Despacho, Aberto na Unidade, etc)
-    Linha 1: Valores numéricos
+    Função adaptada para extrair dados. 
+    Tenta ler a primeira linha como valores se as colunas forem os labels.
     """
     try:
-        # A primeira linha de dados do DF (index 0) contém os nomes das categorias
-        # A segunda linha de dados do DF (index 1) contém os valores
-        labels = df.iloc[0]
-        values = df.iloc[1]
+        # Se o DataFrame estiver vazio, ignora
+        if df.empty:
+            return None
         
+        # Caso 1: A planilha tem cabeçalhos (Labels) e os dados estão na primeira linha
+        labels = df.columns.tolist()
+        values = df.iloc[0].tolist()
+
+        # Limpeza simples de espaços nos nomes das colunas
+        labels = [str(l).strip() for l in labels]
+
+        # Mapeamento dinâmico baseado em palavras-chave para ser mais resiliente
+        def get_val(keyword, default=0):
+            for i, label in enumerate(labels):
+                if keyword.lower() in label.lower():
+                    val = values[i]
+                    return int(val) if pd.notnull(val) else 0
+            return default
+
         data = {
-            "Total": int(values[0]) if pd.notnull(values[0]) else 0,
+            "Total": values[0] if pd.notnull(values[0]) else 0,
             "Tipo": {
-                str(labels[1]).strip(): int(values[1]) if pd.notnull(values[1]) else 0,
-                str(labels[2]).strip(): int(values[2]) if pd.notnull(values[2]) else 0,
+                "Despacho": get_val("Despacho"),
+                "Ofício": get_val("Ofício"),
+                "Parecer": get_val("Parecer") # Adicionado como exemplo
             },
             "Situação": {
-                str(labels[3]).strip(): int(values[3]) if pd.notnull(values[3]) else 0,
-                str(labels[4]).strip(): int(values[4]) if pd.notnull(values[4]) else 0,
-                str(labels[5]).strip(): int(values[5]) if pd.notnull(values[5]) else 0,
+                "Abertos": get_val("Aberto"),
+                "Concluídos": get_val("concluído"),
+                "Sobrestados": get_val("sobrestado"),
             },
             "Tempo": {
-                str(labels[6]).strip(): int(values[6]) if pd.notnull(values[6]) else 0,
-                str(labels[7]).strip(): int(values[7]) if pd.notnull(values[7]) else 0,
-                str(labels[8]).strip(): int(values[8]) if pd.notnull(values[8]) else 0,
+                "0-5 dias": get_val("0-5") or get_val("Até 5"),
+                "6-15 dias": get_val("6-15"),
+                "15+ dias": get_val("mais de 15") or get_val(">15"),
             }
         }
         return data
-    except Exception:
+    except Exception as e:
+        st.error(f"Erro ao processar aba: {e}")
         return None
 
-st.title("Monitoramento SEI")
-st.markdown("---")
+st.title("📊 Monitoramento de Indicadores SEI")
+st.markdown("Visualize o desempenho e tramitação de processos de forma intuitiva.")
 
-# Upload do arquivo único com várias abas
+# Sidebar para Upload
+st.sidebar.header("Configurações")
 uploaded_file = st.sidebar.file_uploader("Carregar arquivo Excel (.xlsx)", type=["xlsx"])
 
 if uploaded_file:
-    # Carregar o arquivo Excel e listar as abas
     xls = pd.ExcelFile(uploaded_file)
     sheet_names = xls.sheet_names
     
-    # Dicionário para armazenar dados de todas as abas
     all_data = {}
     for sheet in sheet_names:
+        # Lendo a aba - Ajuste 'header=0' se a primeira linha for o título das colunas
         df_sheet = pd.read_excel(xls, sheet_name=sheet)
         parsed = parse_sheet_data(df_sheet)
         if parsed:
             all_data[sheet] = parsed
 
     if all_data:
-        # Seletor de Período (Abas)
         selected_period = st.sidebar.selectbox("Selecione o Período (Aba):", list(all_data.keys()))
         kpis = all_data[selected_period]
 
         # --- MÉTRICAS DE DESTAQUE ---
-        st.subheader(f"Indicadores: {selected_period}")
+        st.subheader(f"📍 Indicadores: {selected_period}")
         m1, m2, m3, m4 = st.columns(4)
+        
         m1.metric("Total de Processos", kpis["Total"])
         m2.metric("Despachos", kpis["Tipo"].get("Despacho", 0))
         m3.metric("Ofícios", kpis["Tipo"].get("Ofício", 0))
-        # Busca flexível por "Processo concluído" para evitar erros de espaços extras
-        concluidos = next((v for k, v in kpis["Situação"].items() if "concluído" in k.lower()), 0)
-        m4.metric("Concluídos", concluidos)
+        m4.metric("Concluídos", kpis["Situação"].get("Concluídos", 0))
 
         st.markdown("---")
 
@@ -78,34 +91,48 @@ if uploaded_file:
         col1, col2 = st.columns(2)
 
         with col1:
-            st.write("### Composição por Tipo")
-            df_tipo = pd.DataFrame(list(kpis["Tipo"].items()), columns=["Tipo", "Qtd"])
-            fig_tipo = px.pie(df_tipo, names="Tipo", values="Qtd", hole=0.4, 
-                              color_discrete_sequence=px.colors.qualitative.Pastel)
-            st.plotly_chart(fig_tipo, use_container_width=True)
+            st.write("### 🍰 Composição por Tipo")
+            # Filtra apenas itens com valor > 0 para o gráfico não ficar poluído
+            tipos_filtrados = {k: v for k, v in kpis["Tipo"].items() if v > 0}
+            if tipos_filtrados:
+                df_tipo = pd.DataFrame(list(tipos_filtrados.items()), columns=["Tipo", "Qtd"])
+                fig_tipo = px.pie(df_tipo, names="Tipo", values="Qtd", hole=0.4, 
+                                 color_discrete_sequence=px.colors.qualitative.Safe)
+                st.plotly_chart(fig_tipo, use_container_width=True)
+            else:
+                st.info("Sem dados de 'Tipo' para exibir.")
 
         with col2:
-            st.write("### Tempo de Tramitação")
-            df_tempo = pd.DataFrame(list(kpis["Tempo"].items()), columns=["Faixa", "Qtd"])
-            fig_tempo = px.bar(df_tempo, x="Faixa", y="Qtd", color="Faixa", text_auto=True)
-            st.plotly_chart(fig_tempo, use_container_width=True)
+            st.write("### ⏱️ Tempo de Tramitação")
+            tempos_filtrados = {k: v for k, v in kpis["Tempo"].items() if v > 0}
+            if tempos_filtrados:
+                df_tempo = pd.DataFrame(list(tempos_filtrados.items()), columns=["Faixa", "Qtd"])
+                fig_tempo = px.bar(df_tempo, x="Faixa", y="Qtd", color="Faixa", 
+                                  text_auto=True, color_discrete_sequence=px.colors.sequential.Viridis)
+                st.plotly_chart(fig_tempo, use_container_width=True)
+            else:
+                st.info("Sem dados de 'Tempo' para exibir.")
 
-        st.write("### Situação Atual")
-        df_sit = pd.DataFrame(list(kpis["Situação"].items()), columns=["Situação", "Qtd"])
-        fig_sit = px.bar(df_sit, x="Qtd", y="Situação", orientation='h', 
-                         color="Situação", text_auto=True)
-        st.plotly_chart(fig_sit, use_container_width=True)
+        st.write("### 📂 Situação Atual dos Processos")
+        situacao_filtrada = {k: v for k, v in kpis["Situação"].items() if v > 0}
+        if situacao_filtrada:
+            df_sit = pd.DataFrame(list(situacao_filtrada.items()), columns=["Situação", "Qtd"])
+            fig_sit = px.bar(df_sit, x="Qtd", y="Situação", orientation='h', 
+                             color="Situação", text_auto=True, color_discrete_sequence=px.colors.qualitative.Pastel)
+            st.plotly_chart(fig_sit, use_container_width=True)
 
         # --- COMPARATIVO ENTRE ABAS ---
         if len(all_data) > 1:
             st.markdown("---")
-            st.subheader("Evolução entre os Períodos")
-            evol_list = [{"Mês": k, "Total": v["Total"]} for k, v in all_data.items()]
+            st.subheader("📈 Evolução Temporal")
+            evol_list = [{"Período": k, "Total": v["Total"]} for k, v in all_data.items()]
             df_evol = pd.DataFrame(evol_list)
-            fig_evol = px.line(df_evol, x="Mês", y="Total", markers=True, title="Total de Processos por Aba")
+            fig_evol = px.line(df_evol, x="Período", y="Total", markers=True, 
+                              line_shape="spline", title="Evolução do Volume de Processos")
             st.plotly_chart(fig_evol, use_container_width=True)
+            
     else:
-        st.error("Não foi possível encontrar dados no formato esperado nas abas deste arquivo.")
+        st.error("Formato de dados não reconhecido. Verifique se as abas contêm as informações nas primeiras linhas.")
 
 else:
-    st.info("Aguardando upload do arquivo Excel com as abas de período.")
+    st.info("👆 Por favor, carregue o arquivo Excel para gerar o Dashboard.")
