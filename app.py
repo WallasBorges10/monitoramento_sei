@@ -38,11 +38,6 @@ def load_data(file):
         if 'Data de Saída' in df.columns:
             df['Data de Saída'] = pd.to_datetime(df['Data de Saída'], errors='coerce')
         
-        # Padronizar responsável (apenas primeiro nome) - corrigido para garantir que nomes compostos sejam reduzidos
-        if 'Responsável' in df.columns:
-            df['Responsável'] = df['Responsável'].fillna('Não atribuído').astype(str)
-            df['Responsável'] = df['Responsável'].apply(lambda x: x.split()[0] if len(x.split()) > 0 else x)
-        
         # Garantir que a coluna de número do processo seja string
         if 'Nº Processo SEI' in df.columns:
             df['Nº Processo SEI'] = df['Nº Processo SEI'].astype(str)
@@ -57,35 +52,62 @@ if uploaded_file is not None:
     
     if df is not None and not df.empty:
         # --- DEDUPLICAÇÃO POR PROCESSO (VALORES ÚNICOS) ---
-        # Verifica se a coluna 'Nº Processo SEI' existe (com a grafia correta)
         if 'Nº Processo SEI' in df.columns:
-            # Ordena por Data de Saída (mais recente primeiro) para manter a última ocorrência de cada processo
-            # Se houver empates ou datas ausentes, o keep='first' manterá a primeira após a ordenação descendente
-            df_sorted = df.sort_values('Data de Saída', ascending=False, na_position='last')
-            df_unique = df_sorted.drop_duplicates(subset=['Nº Processo SEI'], keep='first')
-            
-            st.info(f"Base original: {len(df)} linhas | Após deduplicação por processo: {len(df_unique)} processos únicos.")
+            # Verifica se a coluna de data existe e tem valores válidos para ordenar
+            if 'Data de Saída' in df.columns and df['Data de Saída'].notna().any():
+                # Ordena por Data de Saída (mais recente primeiro) e mantém a última ocorrência de cada processo
+                df_sorted = df.sort_values('Data de Saída', ascending=False, na_position='last')
+                df_unique = df_sorted.drop_duplicates(subset=['Nº Processo SEI'], keep='first')
+                st.info(f"Base original: {len(df)} linhas | Após deduplicação por processo (usando Data de Saída mais recente): {len(df_unique)} processos únicos.")
+            else:
+                # Sem data válida, apenas remove duplicatas mantendo a primeira ocorrência
+                df_unique = df.drop_duplicates(subset=['Nº Processo SEI'], keep='first')
+                st.info(f"Base original: {len(df)} linhas | Após deduplicação por processo (primeira ocorrência): {len(df_unique)} processos únicos.")
             df = df_unique
         else:
             st.warning("Coluna 'Nº Processo SEI' não encontrada. As contagens podem considerar linhas duplicadas.")
         
+        # --- UNIFORMIZAÇÃO DO RESPONSÁVEL (MAPEAMENTO PERSONALIZADO) ---
+        with st.sidebar:
+            st.header("⚙️ Configurações de Responsável")
+            st.markdown("""
+            Defina como os nomes dos responsáveis devem ser uniformizados.
+            Use o formato: `nome_original:nome_correto`, separado por vírgula.
+            Exemplo: `Rogério:Rogério Calazans, Calazans:Rogério Calazans, Rosana:Rosana Dutra`
+            """)
+            mapping_input = st.text_area(
+                "Mapeamento (original:correto)",
+                value="Rogério:Rogério Calazans, Calazans:Rogério Calazans, Rosana:Rosana Dutra"
+            )
+            
+            # Processa o mapeamento
+            mapping_dict = {}
+            if mapping_input:
+                for item in mapping_input.split(','):
+                    if ':' in item:
+                        orig, corr = item.split(':', 1)
+                        mapping_dict[orig.strip()] = corr.strip()
+        
+        if 'Responsável' in df.columns and mapping_dict:
+            # Aplica o mapeamento: substitui valores originais pelos correspondentes
+            df['Responsável'] = df['Responsável'].replace(mapping_dict).fillna(df['Responsável'])
+            st.sidebar.success(f"Mapeamento aplicado: {len(mapping_dict)} regras.")
+        
         # --- CONFIGURAÇÕES DE SITUAÇÃO ---
         with st.sidebar:
-            st.header("⚙️ Configurações")
+            st.header("🔴🟢 Configurações de Situação")
             st.markdown("Defina as palavras-chave para classificar situações:")
             
             if 'Situação' in df.columns:
-                situacoes_unicas = df['Situação'].dropna().unique().tolist()
-                
                 col1, col2 = st.columns(2)
                 with col1:
                     aberto_keywords = st.text_input(
-                        "🔴 Em aberto (separadas por vírgula)",
+                        "Em aberto (separadas por vírgula)",
                         value="Aberto, Em andamento, Pendente"
                     )
                 with col2:
                     concluido_keywords = st.text_input(
-                        "🟢 Concluído (separadas por vírgula)",
+                        "Concluído (separadas por vírgula)",
                         value="Concluído, Finalizado, Encerrado"
                     )
                 
@@ -207,7 +229,7 @@ if uploaded_file is not None:
         
         st.divider()
         
-        # --- ABAS ---
+        # --- ABAS (mesmo código anterior, inalterado) ---
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "📊 Visão Geral", 
             "👥 Desempenho por Responsável", 
