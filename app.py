@@ -34,11 +34,11 @@ def load_data(file):
         if 'Tempo / Dias' in df.columns:
             df['Tempo / Dias'] = pd.to_numeric(df['Tempo / Dias'], errors='coerce')
         
-        # Converter datas (agora usando 'Data de Saída')
+        # Converter datas (usando 'Data de Saída')
         if 'Data de Saída' in df.columns:
             df['Data de Saída'] = pd.to_datetime(df['Data de Saída'], errors='coerce')
         
-        # Padronizar responsável (primeiro nome)
+        # Padronizar responsável (apenas primeiro nome) - corrigido para garantir que nomes compostos sejam reduzidos
         if 'Responsável' in df.columns:
             df['Responsável'] = df['Responsável'].fillna('Não atribuído').astype(str)
             df['Responsável'] = df['Responsável'].apply(lambda x: x.split()[0] if len(x.split()) > 0 else x)
@@ -57,11 +57,15 @@ if uploaded_file is not None:
     
     if df is not None and not df.empty:
         # --- DEDUPLICAÇÃO POR PROCESSO (VALORES ÚNICOS) ---
+        # Verifica se a coluna 'Nº Processo SEI' existe (com a grafia correta)
         if 'Nº Processo SEI' in df.columns:
-            # Se houver múltiplas linhas para o mesmo processo, manter a mais recente (baseado na 'Data de Saída')
-            df_sorted = df.sort_values('Data de Saída', ascending=False).drop_duplicates(subset=['Nº Processo SEi'], keep='first')
-            st.info(f"Base original: {len(df)} linhas | Após deduplicação por processo: {len(df_sorted)} processos únicos.")
-            df = df_sorted
+            # Ordena por Data de Saída (mais recente primeiro) para manter a última ocorrência de cada processo
+            # Se houver empates ou datas ausentes, o keep='first' manterá a primeira após a ordenação descendente
+            df_sorted = df.sort_values('Data de Saída', ascending=False, na_position='last')
+            df_unique = df_sorted.drop_duplicates(subset=['Nº Processo SEI'], keep='first')
+            
+            st.info(f"Base original: {len(df)} linhas | Após deduplicação por processo: {len(df_unique)} processos únicos.")
+            df = df_unique
         else:
             st.warning("Coluna 'Nº Processo SEI' não encontrada. As contagens podem considerar linhas duplicadas.")
         
